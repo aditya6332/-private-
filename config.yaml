@@ -1,0 +1,21 @@
+# pubmed_scraper/config.yaml
+seed_keywords:
+  - "psychology"
+  - "neuroscience"
+  - "cognitive science"
+
+iterations: 10
+
+pubmed:
+  base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+  email: "" # Set via environment variable: PUBMED_EMAIL
+  retmax: 100
+
+database:
+  mode: "auto" # 'auto', 'local', or 'cloud'
+  local_uri: "mongodb://mongo:27017" # For Docker Compose
+  cloud_uri: "" # Set via environment variable: MONGODB_CLOUD_URI
+  db_name: "pubmed_scraper"
+
+runtime:
+  request_timeout: 10

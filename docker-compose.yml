@@ -1,0 +1,27 @@
+# pubmed_scraper/docker-compose.yml
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+    environment:
+      - PUBMED_EMAIL=your_email@example.com # <-- CHANGE THIS
+      - MONGODB_LOCAL_URI=mongodb://mongo:27017
+      - DB_MODE=auto
+      # - MONGODB_CLOUD_URI=your_atlas_uri_here # <-- Optionally add for local testing
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:

@@ -1,3 +1,8 @@
-biopython
-psycopg2-binary
-python-dotenv
+# pubmed_scraper/requirements.txt
+fastapi
+uvicorn[standard]
+requests
+pymongo
+pyyaml
+jinja2
+python-multipart
