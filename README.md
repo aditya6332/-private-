@@ -1,145 +1,168 @@
-PubMed Distributed Knowledge Base Builder (Koyeb Edition)
-This project provides a robust, secure, and scalable architecture for building a large-scale knowledge base by scraping PubMed. It is designed for deployment on the Koyeb serverless platform, ensuring high availability for the scraper and enhanced security for your data and credentials.
+PubMed Knowledge Base Builder (Azure Serverless Edition) This project
+provides a robust, secure, and scalable serverless architecture for
+building a large-scale knowledge base by scraping PubMed. It is designed
+for easy deployment on Microsoft Azure using modern, cloud-native
+services.
 
-Architecture & Security
-This system leverages a modern, secure architecture:
+This version is a complete refactor of the original project, simplifying
+the architecture and removing the need for local database tunneling and
+manual sync scripts.
 
-Koyeb Git-Driven App: The scraper runs as a persistent background worker on Koyeb, deployed directly from a GitHub repository.
+Architecture Overview The system is composed of four key cloud
+components that work together seamlessly. This design is highly
+efficient, scalable, and cost-effective, running almost entirely within
+Azure\'s free service tiers for typical use.
 
-Koyeb Managed PostgreSQL DB: A secure, managed database in the cloud acts as a temporary buffer for scraped data.
+Azure Functions (Serverless Compute):
 
-Secure Secrets: All sensitive credentials (passwords, API keys) are stored as Environment Variables in Koyeb, not in code.
+A Python-based Function App acts as the brain of the operation.
 
-Secure Tunneling with ngrok: Instead of insecure port forwarding, ngrok creates a temporary, encrypted connection to your local database when it's online.
+Timer Trigger: The main scraper function runs automatically on a
+schedule (e.g., every hour). It scrapes PubMed, expands keywords, and
+saves results.
 
-Local Sync Script: A local script pulls data from the cloud buffer to your main knowledge base on your laptop, ensuring your home network is never exposed.
+HTTP Triggers: Other functions provide APIs for the dashboard to connect
+to SignalR, get the initial list of articles, and serve the dashboard
+HTML itself.
 
-Step-by-Step Deployment Guide
-Step 1: Prerequisites
-Accounts:
+Azure Table Storage (NoSQL Database):
 
-A GitHub account.
+A highly scalable and extremely low-cost NoSQL database stores all the
+scraped article data.
 
-A Koyeb account.
+It\'s perfect for this use case as it handles simple, structured data
+without the overhead of a relational database.
 
-An ngrok account (the free tier is sufficient).
+Azure SignalR Service (Real-time Messaging):
 
-Software:
+This managed service provides a real-time communication channel between
+the scraper function and the web dashboard.
 
-Git installed on your machine.
+When the scraper finds a new article, it sends a message via SignalR,
+which is immediately pushed to all connected dashboard clients, creating
+a live feed.
 
-PostgreSQL installed on your laptop.
+Static HTML Dashboard (Frontend):
 
-Python 3.8+ installed locally.
+A single, dependency-free HTML file acts as the user interface. It\'s
+served directly by one of the Azure Functions.
 
-The ngrok executable downloaded to your laptop.
+It connects to SignalR to receive live status updates and new articles,
+and fetches the most recent articles on initial load.
 
-Step 2: Set Up the Cloud Database on Koyeb
-Log in to your Koyeb dashboard.
+Deployment Guide Follow these steps to deploy the entire application to
+your Azure account.
 
-Navigate to the Databases tab and click Create Database Service.
+Prerequisites An Azure account (a free account is sufficient to start).
 
-Choose PostgreSQL, select a region (e.g., Frankfurt, Germany), name your service (e.g., pubmed-buffer-db), and create it.
+Azure CLI installed on your machine. (Installation Guide)
 
-Once deployed, Koyeb will provide you with all the connection credentials (host, port, database name, user, password). Copy these to a temporary, secure note for the next steps.
+Azure Functions Core Tools installed. (npm install -g
+azure-functions-core-tools@4)
 
-Step 3: Prepare and Push Your Code to GitHub
-Create a new, private repository on GitHub (e.g., pubmed-scraper).
+Python 3.9+ and Git installed locally.
 
-Save the four project files (scraper_worker.py, sync_local_db.py, config.ini, requirements.txt) into a folder on your computer.
+Step 1: Set Up Azure Resources First, log in to Azure and create a
+resource group to hold all your services. Then, create the necessary
+resources using the Azure CLI.
 
-Crucially, add a .gitignore file to prevent committing sensitive local files:
+\# 1. Log in to your Azure account az login
 
-# .gitignore
-.env
-__pycache__/
+\# 2. Create a resource group to contain all services az group create
+\--name PubmedScraperRG \--location \"EastUS\"
 
-Initialize a Git repository and push the code:
+\# 3. Create a general-purpose storage account for Table Storage and the
+Function App az storage account create \--name pubmedstoragedata\$RANDOM
+\--location \"EastUS\" \--resource-group PubmedScraperRG \--sku
+Standard_LRS
 
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin [https://github.com/YOUR_USERNAME/pubmed-scraper.git](https://github.com/YOUR_USERNAME/pubmed-scraper.git)
-git push -u origin main
+\# 4. Create a SignalR Service instance (Free Tier) az signalr create
+\--name pubmed-scraper-signalr \--resource-group PubmedScraperRG \--sku
+Free_F1
 
-Step 4: Deploy the Scraper App on Koyeb
-On the Koyeb dashboard, go to the Apps tab and click Create App.
+\# 5. Create the serverless Function App az functionapp create
+\--resource-group PubmedScraperRG \--consumption-plan-location
+\"EastUS\" \--runtime python \--runtime-version 3.9 \--functions-version
+4 \--name PubmedScraperApp\$RANDOM \--storage-account
+\<your-new-storage-account-name\>
 
-Choose GitHub as the deployment method. Select your pubmed-scraper repository.
+Note: Replace \<your-new-storage-account-name\> with the name of the
+storage account you just created.
 
-Service Type: Change the service type from Web Service to Worker. This is for background jobs that don't need a public URL.
+Step 2: Configure the Function App Your Function App needs connection
+strings and settings to communicate with other services. These are
+stored securely as Application Settings.
 
-Run Command: Ensure the run command is python scraper_worker.py.
+Go to the Azure Portal and navigate to your Function App.
 
-Environment Variables: This is the most critical step for security. Click Add Variable for each of the following, using the "Secret" type for all passwords.
+Go to Settings -\> Configuration.
 
-NCBI_EMAIL: Your actual email for the PubMed API.
+Click + New application setting for each of the following:
 
-Cloud DB Credentials (from Koyeb DB):
+Setting Name
 
-CLOUD_DB_HOST, CLOUD_DB_PORT, CLOUD_DB_NAME, CLOUD_DB_USER, CLOUD_DB_PASS
+Value
 
-Email Notification Credentials:
+Description
 
-SMTP_SERVER (e.g., smtp.gmail.com)
+NCBI_EMAIL
 
-SMTP_PORT (e.g., 587)
+Your actual email address.
 
-SENDER_EMAIL (your email)
+Required by the PubMed API for identification.
 
-SENDER_PASSWORD (your email "App Password" if using 2FA)
+SEED_KEYWORDS
 
-RECIPIENT_EMAIL (where you want to receive updates)
+neuroscience, cognitive psychology
 
-Local DB Tunnel Credentials (leave these blank for now):
+Comma-separated list of keywords to scrape.
 
-LOCAL_DB_HOST, LOCAL_DB_PORT, LOCAL_DB_NAME, LOCAL_DB_USER, LOCAL_DB_PASS
+TABLE_STORAGE_CONN_STR
 
-Click Deploy. Koyeb will pull your code, install dependencies, and start your worker. It will use the cloud DB by default since the local DB variables are empty.
+Connection string from your Storage Account
 
-Step 5: Local Laptop Usage
-A. Running the Secure Tunnel with ngrok
-When you want your laptop to be available for direct data transfer:
+Found in your Storage Account under Access keys.
 
-Authenticate ngrok: ngrok config add-authtoken YOUR_NGROK_TOKEN
+AzureSignalRConnectionString
 
-Start a TCP tunnel to your local PostgreSQL port (usually 5432):
+Connection string from your SignalR Service
 
-ngrok tcp 5432
+Found in your SignalR Service under Keys.
 
-ngrok will give you a forwarding address, like tcp://2.tcp.ngrok.io:12345.
+Click Save after adding all the settings.
 
-The Host is 2.tcp.ngrok.io.
+Step 3: Deploy the Code With the cloud infrastructure in place, you can
+now deploy the application code.
 
-The Port is 12345.
+\# 1. Clone your repository containing the function app code \# git
+clone \...
 
-Go back to your App's settings in Koyeb. Update the LOCAL_DB_HOST and LOCAL_DB_PORT environment variables with these new values to direct traffic to your laptop. Also, fill in your local LOCAL_DB_NAME, LOCAL_DB_USER, and LOCAL_DB_PASS. The app will automatically redeploy and begin using the tunnel.
+\# 2. Navigate into the root directory of the project \# cd
+your-project-folder
 
-B. Running the Sync Script
-When ngrok is not running, data accumulates in the cloud buffer. To sync it:
+\# 3. Deploy the function app (replace with your Function App\'s name)
+func azure functionapp publish \<your-function-app-name\>
 
-Install local dependencies: pip install -r requirements.txt
+Step 4: Access Your Dashboard The application is now live. The scraper
+will trigger automatically on its schedule (once per hour).
 
-Create a .env file in the same directory as sync_local_db.py. This file securely stores your local credentials without putting them in your code.
+Find your dashboard URL in the Azure Portal by navigating to your
+Function App, clicking on the serve_frontend function, and clicking Get
+Function Url.
 
-# .env file for sync script
-# Your local DB running on your machine
-LOCAL_DB_HOST_SYNC=localhost
-LOCAL_DB_PORT_SYNC=5432
-LOCAL_DB_NAME=knowledge_base # or whatever you named it
-LOCAL_DB_USER=your_local_db_user
-LOCAL_DB_PASS=your_local_db_password
+The URL will look something like:
+https://\<your-app-name\>.azurewebsites.net/api/dashboard
 
-# Copy the cloud DB credentials here from Koyeb
-CLOUD_DB_HOST=...
-CLOUD_DB_PORT=...
-CLOUD_DB_NAME=...
-CLOUD_DB_USER=...
-CLOUD_DB_PASS=...
+Local Development You can run the entire application on your local
+machine for testing before deploying.
 
-Run the sync script from your terminal:
+Fill in local.settings.json: Use the provided local.settings.json file.
+Copy the connection strings from your created Azure resources into this
+file.
 
-python sync_local_db.py
+Start the Function App: Open a terminal in the project root and run:
 
-This will securely connect to both databases, transfer the new data, and clear the buffer.
+func start
+
+The functions will be available at http://localhost:7071. You can access
+the dashboard at http://localhost:7071/api/dashboard.

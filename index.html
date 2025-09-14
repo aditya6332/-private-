@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PubMed Scraper - Live Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .article-card {
+            transition: all 0.3s ease-in-out;
+            transform-origin: top;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-gray-900">PubMed Scraper Dashboard</h1>
+            <p class="text-lg text-gray-600 mt-2">Live updates from the Azure Function scraper.</p>
+        </header>
+
+        <!-- Status Bar -->
+        <div id="status-bar" class="bg-white p-4 rounded-lg shadow-md mb-8 flex items-center space-x-4">
+            <div id="status-light" class="w-4 h-4 rounded-full bg-yellow-400 animate-pulse"></div>
+            <div>
+                <span class="font-semibold">Status:</span>
+                <span id="status-message">Initializing connection...</span>
+            </div>
+        </div>
+
+        <!-- Articles Feed -->
+        <main>
+            <h2 class="text-2xl font-semibold mb-4 text-gray-700">Recently Found Articles</h2>
+            <div id="articles-container" class="space-y-4">
+                <!-- Articles will be dynamically inserted here -->
+                <div id="loader" class="text-center p-8">
+                    <p class="text-gray-500">Loading initial articles...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const articlesContainer = document.getElementById('articles-container');
+        const statusMessage = document.getElementById('status-message');
+        const statusLight = document.getElementById('status-light');
+        const loader = document.getElementById('loader');
+        
+        // The API prefix is '/api' for all functions when deployed to Azure.
+        const apiBaseUrl = '/api'; 
+
+        function createArticeCard(article) {
+            const card = document.createElement('div');
+            card.className = 'article-card bg-white p-6 rounded-lg shadow-sm border border-gray-200';
+            
+            const safeTitle = article.title ? escapeHtml(article.title) : 'No Title';
+            const safeJournal = article.journal ? escapeHtml(article.journal) : 'N/A';
+            const safeAuthors = article.authors ? escapeHtml(article.authors) : 'N/A';
+            const safeDate = article.publication_date ? escapeHtml(article.publication_date) : 'N/A';
+            const pmid = article.RowKey;
+
+            card.innerHTML = `
+                <h3 class="text-xl font-bold text-blue-700 hover:underline">
+                    <a href="https://pubmed.ncbi.nlm.nih.gov/${pmid}/" target="_blank" rel="noopener noreferrer">${safeTitle}</a>
+                </h3>
+                <p class="text-sm text-gray-500 mt-1">
+                    <span class="font-semibold">${safeJournal}</span> &bull; ${safeDate}
+                </p>
+                <p class="text-gray-600 mt-2">
+                    <strong>Authors:</strong> ${safeAuthors}
+                </p>
+                <div class="mt-4">
+                    <a href="https://pubmed.ncbi.nlm.nih.gov/${pmid}/" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Read on PubMed &rarr;</a>
+                </div>
+            `;
+            return card;
+        }
+
+        function prependArticle(article) {
+            if (!article || !article.RowKey) return;
+            if (loader) loader.style.display = 'none';
+
+            const card = createArticeCard(article);
+            card.classList.add('fade-in');
+            articlesContainer.prepend(card);
+
+            while(articlesContainer.children.length > 50) {
+                articlesContainer.removeChild(articlesContainer.lastChild);
+            }
+        }
+
+        function updateStatus(message, state = 'processing') {
+            statusMessage.textContent = escapeHtml(message);
+            statusLight.className = 'w-4 h-4 rounded-full'; // Reset classes
+            switch (state) {
+                case 'connected':
+                    statusLight.classList.add('bg-green-500');
+                    break;
+                case 'disconnected':
+                    statusLight.classList.add('bg-red-500');
+                    break;
+                case 'processing':
+                    statusLight.classList.add('bg-yellow-400', 'animate-pulse');
+                    break;
+            }
+        }
+        
+        function escapeHtml(unsafe) {
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+
+        async function fetchInitialData() {
+            try {
+                const response = await fetch(`${apiBaseUrl}/get-initial-data`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const articles = await response.json();
+                if (articles.length > 0) {
+                     if (loader) loader.style.display = 'none';
+                     articles.forEach(article => {
+                        articlesContainer.appendChild(createArticeCard(article));
+                     });
+                } else {
+                     if (loader) loader.textContent = 'No articles found in the database yet.';
+                }
+            } catch (error) {
+                console.error("Could not fetch initial data:", error);
+                if (loader) loader.textContent = 'Could not load initial articles. See console for details.';
+                updateStatus('Failed to load initial data.', 'disconnected');
+            }
+        }
+
+        function startConnection() {
+            const connection = new signalR.HubConnectionBuilder()
+                .withUrl(apiBaseUrl) // The negotiate function is at the root of the /api endpoint
+                .withAutomaticReconnect()
+                .build();
+
+            connection.on('newArticle', prependArticle);
+            connection.on('statusUpdate', (message) => updateStatus(message, 'processing'));
+            connection.onreconnecting(error => updateStatus('Connection lost. Reconnecting...', 'disconnected'));
+            connection.onreconnected(id => updateStatus('Connection re-established.', 'connected'));
+
+            connection.start()
+                .then(() => updateStatus('Connected and listening for updates.', 'connected'))
+                .catch(err => {
+                    console.error('SignalR Connection Error: ', err);
+                    updateStatus('Could not connect to the live update service.', 'disconnected');
+                });
+        }
+        
+        fetchInitialData();
+        startConnection();
+    </script>
+</body>
+</html>
+
